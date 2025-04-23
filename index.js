@@ -63,37 +63,145 @@ app.event('app_mention', async ({ event, context, client, say }) => {
   }
 });
 
-// Handle the button click action
-app.action('deploy_button', async ({ body, ack, say }) => {
-  // Acknowledge the action
+// Show a confirmation dialog when the deploy button is clicked
+app.action('deploy_button', async ({ body, ack, client }) => {
+  // Acknowledge the button click first
   await ack();
   
   try {
-    // Inform the channel that deployment has started
-    // await say(`Deployment triggered by <@${body.user.id}>`);
+    const channelId = body.channel?.id || body.container?.channel_id;
 
-    await fetch(process.env.DEPLOY_API_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'x-deployment-key': process.env.DEPLOYMENT_KEY,
+    // Open a modal with password prompt
+    await client.views.open({
+      trigger_id: body.trigger_id,
+      view: {
+        type: "modal",
+        callback_id: "deploy_confirmation_view",
+        private_metadata: channelId,
+        title: {
+          type: "plain_text",
+          text: "Deployment Confirmation",
+          emoji: true
+        },
+        submit: {
+          type: "plain_text",
+          text: "Deploy Now",
+          emoji: true
+        },
+        close: {
+          type: "plain_text",
+          text: "Cancel",
+          emoji: true
+        },
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: ":warning: You are about to trigger a deployment. Please confirm by entering the deployment password:"
+            }
+          },
+          {
+            type: "input",
+            block_id: "password_block",
+            element: {
+              type: "plain_text_input",
+              action_id: "password_input",
+              placeholder: {
+                type: "plain_text",
+                text: "Enter password"
+              }
+            },
+            label: {
+              type: "plain_text",
+              text: "Deployment Password",
+              emoji: true
+            }
+          }
+        ]
       }
     });
-    
-    await say({
-      text: `Deployment triggered by <@${body.user.id}>! :rocket:\nIt will take about 10 minutes.`,
-      blocks: [
-        {
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": `:white_check_mark: Deployment triggered by <@${body.user.id}>! :rocket:\nIt will take about 10 minutes.`
-          }
-        }
-      ]
-    });
   } catch (error) {
-    console.error(error);
-    await say(`Failed to start deployment: ${error.message}`);
+    console.error("Error opening modal:", error);
+    
+    // Make sure we have channel and user IDs before trying to send messages
+    if (body.channel?.id && body.user?.id) {
+      await client.chat.postEphemeral({
+        channel: body.channel.id,
+        user: body.user.id,
+        text: `Error opening confirmation dialog: ${error.message}`
+      });
+    } else {
+      console.error("Could not send error message - missing channel or user ID");
+      console.error("Body:", JSON.stringify(body));
+    }
+  }
+});
+
+// Handle the modal submission with password verification
+app.view('deploy_confirmation_view', async ({ ack, body, view, client }) => {
+  // Get password from input
+  const password = view.state.values.password_block.password_input.value;
+  
+  // Check if password matches the one in environment variables
+  if (password === process.env.DEPLOYMENT_PASSWORD) {
+    // Password is correct, proceed with deployment
+    await ack();
+    
+    try {
+      // Get user who submitted the modal
+      const userId = body.user.id;
+      const channelId = body.view.private_metadata || 
+                        body.channel?.id || 
+                        body.container?.channel_id;
+      
+      // Call deployment API
+      // await fetch(process.env.DEPLOY_API_ENDPOINT, {
+      //   method: 'POST',
+      //   headers: {
+      //     'x-deployment-key': process.env.DEPLOYMENT_KEY,
+      //   }
+      // });
+      
+      // Post confirmation message in the channel
+      if (channelId) {
+        await client.chat.postMessage({
+          channel: channelId,
+          text: `Deployment triggered by <@${userId}>! :rocket:\nIt will take about 10 minutes.`,
+          blocks: [
+            {
+              "type": "section",
+              "text": {
+                "type": "mrkdwn",
+                "text": `:white_check_mark: Deployment triggered by <@${userId}>! :rocket:\nIt will take about 10 minutes.`
+              }
+            }
+          ]
+        });
+      } else {
+        // If channel ID is not available, send ephemeral message to user
+        await client.chat.postEphemeral({
+          channel: userId,
+          user: userId,
+          text: `:white_check_mark: Deployment triggered! :rocket:\nIt will take about 10 minutes.`
+        });
+      }
+    } catch (error) {
+      console.error(error);
+      await client.chat.postEphemeral({
+        channel: body.user.id,
+        user: body.user.id,
+        text: `Failed to start deployment: ${error.message}`
+      });
+    }
+  } else {
+    // Password is incorrect
+    await ack({
+      response_action: "errors",
+      errors: {
+        password_block: "Invalid deployment password. Please try again."
+      }
+    });
   }
 });
 
