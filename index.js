@@ -156,12 +156,12 @@ app.view('deploy_confirmation_view', async ({ ack, body, view, client }) => {
                         body.container?.channel_id;
       
       // Call deployment API
-      // await fetch(process.env.DEPLOY_API_ENDPOINT, {
-      //   method: 'POST',
-      //   headers: {
-      //     'x-deployment-key': process.env.DEPLOYMENT_KEY,
-      //   }
-      // });
+      await fetch(process.env.DEPLOY_API_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'x-deployment-key': process.env.DEPLOYMENT_KEY,
+        }
+      });
       
       // Post confirmation message in the channel
       if (channelId) {
