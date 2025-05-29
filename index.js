@@ -71,13 +71,16 @@ app.action('deploy_button', async ({ body, ack, client }) => {
   try {
     const channelId = body.channel?.id || body.container?.channel_id;
 
-    // Open a modal with password prompt
+    // Open a modal with password prompt, including the original message context
     await client.views.open({
       trigger_id: body.trigger_id,
       view: {
         type: "modal",
         callback_id: "deploy_confirmation_view",
-        private_metadata: channelId,
+        private_metadata: JSON.stringify({
+          channelId: channelId,
+          messageTs: body.message.ts
+        }),
         title: {
           type: "plain_text",
           text: "Deployment Confirmation",
@@ -149,11 +152,16 @@ app.view('deploy_confirmation_view', async ({ ack, body, view, client }) => {
     await ack();
     
     try {
-      // Get user who submitted the modal
+      // Get user who submitted the modal and original message context
       const userId = body.user.id;
-      const channelId = body.view.private_metadata || 
-                        body.channel?.id || 
-                        body.container?.channel_id;
+      let channelId, messageTs;
+      try {
+        const metadata = JSON.parse(view.private_metadata);
+        channelId = metadata.channelId;
+        messageTs = metadata.messageTs;
+      } catch (e) {
+        channelId = view.private_metadata || body.channel?.id || body.container?.channel_id;
+      }
       
       // Call deployment API
       await fetch(process.env.DEPLOY_API_ENDPOINT, {
@@ -162,6 +170,24 @@ app.view('deploy_confirmation_view', async ({ ack, body, view, client }) => {
           'x-deployment-key': process.env.DEPLOYMENT_KEY,
         }
       });
+      
+      // Update the original message to reflect deployment status
+      if (channelId && messageTs) {
+        await client.chat.update({
+          channel: channelId,
+          ts: messageTs,
+          text: `:white_check_mark: Deployment triggered by <@${userId}>!`,
+          blocks: [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: `:white_check_mark: Deployment triggered by <@${userId}>!`
+              }
+            }
+          ]
+        });
+      }
       
       // Post confirmation message in the channel
       if (channelId) {
